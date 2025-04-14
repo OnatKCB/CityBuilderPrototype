@@ -6,13 +6,17 @@ using UnityEngine.Tilemaps;
 [CustomEditor(typeof(TilemapGenerator))]
 public class TilemapGeneratorEditor : Editor
 {
-    private SerializedProperty mapWidthProperty;
-    private SerializedProperty mapHeightProperty;
+    private SerializedProperty mapWidthProperty;    private SerializedProperty mapHeightProperty;
     private SerializedProperty tileWidthProperty;
     private SerializedProperty tileHeightProperty;
-    private SerializedProperty tilePrefabProperty;
+    private SerializedProperty tilePrefabsProperty; // Changed to list of prefabs
+    private SerializedProperty defaultTilePrefabIndexProperty; // Added for default prefab selection
+    private SerializedProperty useRandomTilePrefabsProperty; // Added for random prefab option
+    private SerializedProperty clusteringScaleProperty; // Added for controlling tile distribution
     private SerializedProperty saveFilePathProperty;
     private SerializedProperty hasBeenGeneratedProperty;
+    private SerializedProperty mapShapeProperty; // For map shape selection
+    private SerializedProperty shapeThicknessProperty; // For shape thickness
     
     // New properties for Unity Grid integration
     private SerializedProperty useUnityGridProperty;
@@ -20,14 +24,18 @@ public class TilemapGeneratorEditor : Editor
     private SerializedProperty gridContainerProperty;
     
     private void OnEnable()
-    {
-        mapWidthProperty = serializedObject.FindProperty("mapWidth");
+    {        mapWidthProperty = serializedObject.FindProperty("mapWidth");
         mapHeightProperty = serializedObject.FindProperty("mapHeight");
         tileWidthProperty = serializedObject.FindProperty("tileWidth");
         tileHeightProperty = serializedObject.FindProperty("tileHeight");
-        tilePrefabProperty = serializedObject.FindProperty("tilePrefab");
+        tilePrefabsProperty = serializedObject.FindProperty("tilePrefabs"); // Changed to tilePrefabs list
+        defaultTilePrefabIndexProperty = serializedObject.FindProperty("defaultTilePrefabIndex"); // Added default index
+        useRandomTilePrefabsProperty = serializedObject.FindProperty("useRandomTilePrefabs"); // Added random option
+        clusteringScaleProperty = serializedObject.FindProperty("clusteringScale"); // Added clustering scale
         saveFilePathProperty = serializedObject.FindProperty("saveFilePath");
         hasBeenGeneratedProperty = serializedObject.FindProperty("hasBeenGenerated");
+        mapShapeProperty = serializedObject.FindProperty("mapShape"); // Initialize map shape property
+        shapeThicknessProperty = serializedObject.FindProperty("shapeThickness"); // Initialize shape thickness property
         
         // Get Unity Grid integration properties
         useUnityGridProperty = serializedObject.FindProperty("useUnityGrid");
@@ -44,6 +52,8 @@ public class TilemapGeneratorEditor : Editor
         EditorGUILayout.LabelField("Tilemap Settings", EditorStyles.boldLabel);
         
         EditorGUI.BeginChangeCheck();
+        EditorGUILayout.PropertyField(mapShapeProperty, new GUIContent("Map Shape")); // Draw the map shape field
+        EditorGUILayout.PropertyField(shapeThicknessProperty, new GUIContent("Shape Thickness", "Controls the thickness/width of shape borders")); // Draw the shape thickness field
         EditorGUILayout.PropertyField(mapWidthProperty, new GUIContent("Map Width"));
         EditorGUILayout.PropertyField(mapHeightProperty, new GUIContent("Map Height"));
         bool dimensionsChanged = EditorGUI.EndChangeCheck();
@@ -93,10 +103,53 @@ public class TilemapGeneratorEditor : Editor
             EditorGUILayout.PropertyField(gridContainerProperty, new GUIContent("Grid Container", 
                 "Transform where tiles will be parented (will be auto-created if empty)"));
         }
-        
-        EditorGUILayout.Space();
+          EditorGUILayout.Space();
         EditorGUILayout.LabelField("Tile Prefabs", EditorStyles.boldLabel);
-        EditorGUILayout.PropertyField(tilePrefabProperty, new GUIContent("Tile Prefab"));
+        
+        // Draw the list of tile prefabs
+        EditorGUILayout.PropertyField(tilePrefabsProperty, new GUIContent("Tile Prefabs", "List of prefabs to use for generating tiles"), true);
+        
+        // If we have prefabs in the list, show the default index and random option
+        if (tilePrefabsProperty.arraySize > 0)
+        {
+            // Show default index selection
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PropertyField(defaultTilePrefabIndexProperty, 
+                new GUIContent("Default Prefab Index", "Index of the default prefab to use from the list (0 is first)"));
+            
+            // Show a button to validate/fix the index if it's out of range
+            if (GUILayout.Button("Validate", GUILayout.Width(70)))
+            {
+                defaultTilePrefabIndexProperty.intValue = Mathf.Clamp(defaultTilePrefabIndexProperty.intValue, 0, 
+                                                                      tilePrefabsProperty.arraySize - 1);
+            }
+            EditorGUILayout.EndHorizontal();
+              // Show random option toggle
+            EditorGUILayout.PropertyField(useRandomTilePrefabsProperty, 
+                new GUIContent("Use Random Prefabs", "When enabled, a random prefab from the list will be used for each tile"));
+            
+            // Only show clustering scale when random tile generation is enabled
+            if (useRandomTilePrefabsProperty.boolValue)
+            {
+                EditorGUILayout.PropertyField(clusteringScaleProperty,
+                    new GUIContent("Clustering Scale", "Controls how similar tiles are grouped together (0: completely random, 1: maximum clustering)"));
+                
+                // Display a helpful note about the clustering scale
+                if (clusteringScaleProperty.floatValue > 0)
+                {
+                    string clusteringDescription = clusteringScaleProperty.floatValue < 0.3f ? "Low clustering - slightly grouped tiles" :
+                                                clusteringScaleProperty.floatValue < 0.7f ? "Medium clustering - moderately grouped tiles" :
+                                                "High clustering - strongly grouped tiles";
+                    
+                    EditorGUILayout.HelpBox(clusteringDescription, MessageType.Info);
+                }
+            }
+        }
+        else
+        {
+            // Show a warning if no prefabs are assigned
+            EditorGUILayout.HelpBox("Please add at least one tile prefab to the list above.", MessageType.Warning);
+        }
         
         EditorGUILayout.Space();
         EditorGUILayout.PropertyField(saveFilePathProperty, new GUIContent("Save File Path"));

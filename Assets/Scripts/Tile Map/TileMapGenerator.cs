@@ -10,12 +10,27 @@ using UnityEngine.Tilemaps; // Add Unity Tilemap namespace
 using UnityEditor;
 #endif
 
+// Enum to define the possible map shapes
+public enum MapShape
+{
+    Rectangle, // Default rectangular shape
+    O,         // Hollow O shape (rectangular border)
+    T,
+    H,
+    V,
+    S
+}
+
 // Main class that implements all interfaces - adhering to Single Responsibility Principle
 // through composition and clear separation of behaviors
 [ExecuteInEditMode]
 public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersistence, IGridCoordinateSystem
 {
     [Header("Tilemap Settings")]
+    public MapShape mapShape = MapShape.Rectangle; // Add shape selection
+    [Range(1, 3)]
+    [Tooltip("Controls the thickness/width of the shape borders")]
+    public int shapeThickness = 1;
     public int mapWidth = 10;
     public int mapHeight = 10;
     public float tileWidth = 1f;
@@ -25,13 +40,20 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
     [Tooltip("Use Unity's built-in Grid component instead of custom grid")]
     public bool useUnityGrid = true;
     [Tooltip("Reference to a Unity Grid component - will be auto-created if null")]
-    public Grid unityGrid;
-    [Tooltip("Where to place tiles - either on Unity Grid or on custom grid container")]
+    public Grid unityGrid;    [Tooltip("Where to place tiles - either on Unity Grid or on custom grid container")]
     public Transform gridContainer;
     
-    [Header("References")]
-    public GameObject tilePrefab;
-
+    [Header("Tile Prefabs")]
+    [Tooltip("List of available tile prefabs to use when generating tiles")]
+    public List<GameObject> tilePrefabs = new List<GameObject>();
+    [Tooltip("Index of the default tile prefab to use (0 is first in the list)")]
+    public int defaultTilePrefabIndex = 0;
+    [Tooltip("When enabled, random prefabs from the list will be used for tile generation")]
+    public bool useRandomTilePrefabs = false;
+    [Range(0, 1)]
+    [Tooltip("Controls clustering of similar tiles (0: completely random, 1: maximum clustering)")]
+    public float clusteringScale = 0;
+    
     // Reference to the Unity Tilemap component if using Unity Grid
     [HideInInspector] public Tilemap unityTilemap;
     
@@ -190,8 +212,98 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
         {
             for (int y = 0; y < mapHeight; y++)
             {
-                CreateTile(x, y);
+                // Only create a tile if it belongs to the selected shape
+                if (ShouldCreateTile(x, y))
+                {
+                    CreateTile(x, y);
+                }
             }
+        }
+    }    // Helper function to determine if a tile should be created based on the map shape
+    private bool ShouldCreateTile(int x, int y)
+    {
+        switch (mapShape)
+        {
+            case MapShape.Rectangle:
+                return true; // Always create for rectangle
+
+            case MapShape.O: // Hollow O shape (border only)
+                // Create tiles on the perimeter with specified thickness
+                int borderThickness = Mathf.Min(shapeThickness, Mathf.Min(mapWidth, mapHeight) / 3); // Cap thickness
+                if (x < borderThickness || x >= mapWidth - borderThickness || 
+                    y < borderThickness || y >= mapHeight - borderThickness)
+                    return true;
+                return false;
+
+            case MapShape.T:
+                // Horizontal bar (top)
+                if (y >= mapHeight - shapeThickness)
+                    return true;
+                // Vertical bar (middle column)
+                int midX = mapWidth / 2;
+                if (x >= midX - shapeThickness/2 && x <= midX + shapeThickness/2)
+                    return true;
+                return false;
+
+            case MapShape.H:
+                // Two vertical bars (sides)
+                if (x < shapeThickness || x >= mapWidth - shapeThickness)
+                    return true;
+                // Horizontal bar (middle row)
+                int midY = mapHeight / 2;
+                if (y >= midY - shapeThickness/2 && y <= midY + shapeThickness/2)
+                    return true;
+                return false;
+
+            case MapShape.V:
+                // Diagonal lines forming a V with thickness
+                int centerX = mapWidth / 2;
+                
+                // Left diagonal part
+                for (int i = 0; i < shapeThickness; i++) {
+                    if (x <= centerX && (y == x + i || y == x - i))
+                        return true;
+                }
+                
+                // Right diagonal part
+                for (int i = 0; i < shapeThickness; i++) {
+                    if (x > centerX && (y == mapWidth - 1 - x + i || y == mapWidth - 1 - x - i))
+                        return true;
+                }
+                return false;
+
+            case MapShape.S:
+                // Thicker S shape
+                int quarterWidth = mapWidth / 4;
+                int halfHeight = mapHeight / 2;
+                
+                // Top horizontal segment
+                if (y >= mapHeight - shapeThickness && x >= quarterWidth && x <= 3 * quarterWidth)
+                    return true;
+                    
+                // Middle horizontal segment
+                if (y >= halfHeight - shapeThickness/2 && y <= halfHeight + shapeThickness/2 && 
+                    x >= quarterWidth && x <= 3 * quarterWidth)
+                    return true;
+                    
+                // Bottom horizontal segment
+                if (y < shapeThickness && x >= quarterWidth && x <= 3 * quarterWidth)
+                    return true;
+                    
+                // Left vertical segment (connecting top to middle)
+                if (x >= quarterWidth - shapeThickness/2 && x <= quarterWidth + shapeThickness/2 && 
+                    y >= halfHeight && y <= mapHeight)
+                    return true;
+                    
+                // Right vertical segment (connecting middle to bottom)
+                if (x >= 3*quarterWidth - shapeThickness/2 && x <= 3*quarterWidth + shapeThickness/2 && 
+                    y >= 0 && y <= halfHeight)
+                    return true;
+                    
+                return false;
+
+            default:
+                return false;
         }
     }
 
@@ -238,12 +350,46 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
                     DestroyImmediate(child.gameObject);
             }
         }
-    }
-
-    public void CreateTile(int x, int y)
+    }    public void CreateTile(int x, int y)
     {
         // Ensure grid setup exists
         EnsureGridSetupExists();
+        
+        // Check if we have any valid prefabs in the list
+        if (tilePrefabs.Count == 0)
+        {
+            Debug.LogError("No tile prefabs assigned! Please add at least one tile prefab.");
+            return;
+        }
+          // Choose appropriate prefab
+        GameObject prefabToUse;
+        if (useRandomTilePrefabs)
+        {
+            if (clusteringScale > 0)
+            {
+                // Use clustering to influence random selection
+                prefabToUse = GetClusteredPrefab(x, y);
+            }
+            else
+            {
+                // Use a completely random prefab from the list
+                int randomIndex = UnityEngine.Random.Range(0, tilePrefabs.Count);
+                prefabToUse = tilePrefabs[randomIndex];
+            }
+        }
+        else
+        {
+            // Use the default prefab if valid index, otherwise use the first one
+            int index = Mathf.Clamp(defaultTilePrefabIndex, 0, tilePrefabs.Count - 1);
+            prefabToUse = tilePrefabs[index];
+        }
+        
+        // Exit if no valid prefab found
+        if (prefabToUse == null)
+        {
+            Debug.LogError($"Null prefab reference at position ({x}, {y}). Check your tile prefab list.");
+            return;
+        }
         
         // Convert grid coordinates to isometric position
         Vector2 position = GridToIsometric(x, y);
@@ -255,7 +401,7 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
             Vector3Int cellPosition = new Vector3Int(x, y, 0);
             
             // Instantiate the tile object
-            GameObject tile = Instantiate(tilePrefab, unityGrid.GetCellCenterWorld(cellPosition), Quaternion.identity);
+            GameObject tile = Instantiate(prefabToUse, unityGrid.GetCellCenterWorld(cellPosition), Quaternion.identity);
             tile.name = $"Tile_{x}_{y}";
             tile.transform.SetParent(gridContainer, false);
             
@@ -264,7 +410,7 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
         else
         {
             // Use traditional custom grid approach
-            GameObject tile = Instantiate(tilePrefab, new Vector3(position.x, position.y, 0), Quaternion.identity);
+            GameObject tile = Instantiate(prefabToUse, new Vector3(position.x, position.y, 0), Quaternion.identity);
             
             // Set parent to gridContainer if available, otherwise fall back to this transform
             Transform parent = gridContainer != null ? gridContainer : transform;
@@ -1182,6 +1328,92 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
             SaveTilemap();
             pendingChanges = false;
             lastAutoSaveTime = Time.time;
+        }
+    }
+
+    // Helper method for clustered random tile selection
+    private GameObject GetClusteredPrefab(int x, int y)
+    {
+        // Perlin noise gives us consistent, smoothly varying values based on coordinates
+        // We'll use this for basic clustering behavior
+        float perlinValue = Mathf.PerlinNoise(x * 0.1f, y * 0.1f);
+        
+        // Check adjacent tiles that have already been created
+        List<GameObject> adjacentPrefabs = new List<GameObject>();
+        
+        // Only check tiles within bounds that have already been created (lower indices)
+        if (x > 0 && tiles[x-1, y] != null && tiles[x-1, y].transform.childCount == 0)
+        {
+            // Left tile
+            GameObject leftTile = tiles[x-1, y];
+            // Find which prefab was used for this tile
+            for (int i = 0; i < tilePrefabs.Count; i++)
+            {
+                // Compare name without (Clone) suffix
+                string leftTileName = leftTile.name;
+                if (leftTileName.EndsWith("(Clone)"))
+                    leftTileName = leftTileName.Substring(0, leftTileName.Length - 7);
+                    
+                string prefabName = tilePrefabs[i].name;
+                if (leftTileName == prefabName)
+                {
+                    adjacentPrefabs.Add(tilePrefabs[i]);
+                    break;
+                }
+            }
+        }
+        
+        if (y > 0 && tiles[x, y-1] != null && tiles[x, y-1].transform.childCount == 0)
+        {
+            // Bottom tile
+            GameObject bottomTile = tiles[x, y-1];
+            // Find which prefab was used for this tile
+            for (int i = 0; i < tilePrefabs.Count; i++)
+            {
+                // Compare name without (Clone) suffix
+                string bottomTileName = bottomTile.name;
+                if (bottomTileName.EndsWith("(Clone)"))
+                    bottomTileName = bottomTileName.Substring(0, bottomTileName.Length - 7);
+                    
+                string prefabName = tilePrefabs[i].name;
+                if (bottomTileName == prefabName)
+                {
+                    adjacentPrefabs.Add(tilePrefabs[i]);
+                    break;
+                }
+            }
+        }
+        
+        // Determine whether to use a nearby prefab or pick randomly
+        if (adjacentPrefabs.Count > 0 && UnityEngine.Random.value < clusteringScale)
+        {
+            // Use one of the adjacent prefabs
+            int randomAdjacentIndex = UnityEngine.Random.Range(0, adjacentPrefabs.Count);
+            return adjacentPrefabs[randomAdjacentIndex];
+        }
+        else
+        {
+            // Use a prefab based on perlin noise to create natural clusters
+            // Map the perlin value (0-1) to prefab index
+            int prefabCount = tilePrefabs.Count;
+            int prefabIndex;
+            
+            if (clusteringScale > 0.5f)
+            {
+                // Higher clustering - map perlin noise to prefab index to create larger continuous regions
+                prefabIndex = Mathf.FloorToInt(perlinValue * prefabCount);
+            }
+            else
+            {
+                // Lower clustering - more randomness with some influence from perlin noise
+                float randomValue = UnityEngine.Random.value;
+                // Mix between random and perlin noise based on clustering scale
+                float blendedValue = Mathf.Lerp(randomValue, perlinValue, clusteringScale * 2);
+                prefabIndex = Mathf.FloorToInt(blendedValue * prefabCount);
+            }
+            
+            prefabIndex = Mathf.Clamp(prefabIndex, 0, prefabCount - 1);
+            return tilePrefabs[prefabIndex];
         }
     }
 }
