@@ -110,6 +110,7 @@
     <Compile Include="Assets\Scripts\Controller\PlacementDirection.cs" />
     <Compile Include="Assets\Scripts\Controller\IsometricCameraController.cs" />
     <Compile Include="Assets\TextMesh Pro\Examples &amp; Extras\Scripts\ShaderPropAnimator.cs" />
+    <Compile Include="Assets\Scripts\Tile Map\TilemapSaveManager.cs" />
     <Compile Include="Assets\TextMesh Pro\Examples &amp; Extras\Scripts\CameraController.cs" />
     <Compile Include="Assets\Scripts\Building\IBuildingMenu.cs" />
     <Compile Include="Assets\Scripts\Controller\ObjectDeletionStrategy.cs" />

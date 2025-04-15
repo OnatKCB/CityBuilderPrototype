@@ -185,35 +185,65 @@ public class TilemapGeneratorEditor : Editor
         }
         GUI.backgroundColor = Color.white;
         EditorGUILayout.EndVertical();
+          // Save & Load information
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         
-        // Save & Load buttons
-        EditorGUILayout.BeginHorizontal();
+        // Check if TilemapSaveManager exists in the scene
+        TilemapSaveManager saveManager = FindObjectOfType<TilemapSaveManager>();
         
-        if (GUILayout.Button("Save Tilemap"))
+        if (saveManager != null)
         {
-            // Check if the map is generated first
-            if (!generator.CanSaveOrLoad)
+            EditorGUILayout.HelpBox("Tilemap saving and loading is now managed by the TilemapSaveManager component.", MessageType.Info);
+            
+            if (GUILayout.Button("Select TilemapSaveManager"))
             {
-                Debug.Log("Map not generated yet. Generating map before saving...");
-                generator.GenerateMap();
+                Selection.activeGameObject = saveManager.gameObject;
             }
-            generator.SaveTilemap();
-            EditorUtility.SetDirty(generator);
+        }
+        else
+        {
+            EditorGUILayout.HelpBox("TilemapSaveManager not found in the scene. For advanced save/load functionality, add a TilemapSaveManager component.", MessageType.Warning);
+            
+            // Legacy buttons - only show if TilemapSaveManager is not available
+            EditorGUILayout.BeginHorizontal();
+            
+            if (GUILayout.Button("Save Tilemap (Legacy)"))
+            {
+                // Check if the map is generated first
+                if (!generator.CanSaveOrLoad)
+                {
+                    Debug.Log("Map not generated yet. Generating map before saving...");
+                    generator.GenerateMap();
+                }
+                generator.SaveTilemap();
+                EditorUtility.SetDirty(generator);
+            }
+            
+            if (GUILayout.Button("Load Tilemap (Legacy)"))
+            {
+                // Check if the map is generated first
+                if (!generator.CanSaveOrLoad)
+                {
+                    Debug.Log("Map not generated yet. Generating map before loading...");
+                    generator.GenerateMap();
+                }
+                generator.LoadTilemap();
+                EditorUtility.SetDirty(generator);
+            }
+            
+            EditorGUILayout.EndHorizontal();
+            
+            // Add button to create a TilemapSaveManager
+            if (GUILayout.Button("Add TilemapSaveManager"))
+            {
+                GameObject target = generator.gameObject;
+                target.AddComponent<TilemapSaveManager>();
+                Debug.Log("TilemapSaveManager component added.");
+                EditorUtility.SetDirty(target);
+            }
         }
         
-        if (GUILayout.Button("Load Tilemap"))
-        {
-            // Check if the map is generated first
-            if (!generator.CanSaveOrLoad)
-            {
-                Debug.Log("Map not generated yet. Generating map before loading...");
-                generator.GenerateMap();
-            }
-            generator.LoadTilemap();
-            EditorUtility.SetDirty(generator);
-        }
-        
-        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.EndVertical();
         
         // Advanced operations section
         EditorGUILayout.Space(5);
@@ -243,17 +273,30 @@ public class TilemapGeneratorEditor : Editor
         }
         
         EditorGUILayout.EndHorizontal();
-        
-        // Force Reload without clearing tiles
+          // Force Reload without clearing tiles
         if (GUILayout.Button("Force Reload (Keep Base Tiles)"))
         {
             if (generator.CanSaveOrLoad)
             {
-                // Special reload that preserves the base tiles but re-loads objects on them
-                Undo.RecordObject(generator, "Force Reload Tilemap");
-                generator.LoadTilemap();
-                EditorUtility.SetDirty(generator);
-                Debug.Log("Force reload completed. Check the console for any errors.");
+                // Check for TilemapSaveManager first
+                TilemapSaveManager currentSaveManager = FindObjectOfType<TilemapSaveManager>();
+                
+                if (currentSaveManager != null && currentSaveManager.GetAvailableSaves().Count > 0)
+                {
+                    // Use the TilemapSaveManager to reload the current map
+                    Undo.RecordObject(generator, "Force Reload Tilemap");
+                    currentSaveManager.LoadTilemap(currentSaveManager.GetAvailableSaves()[0]);
+                    EditorUtility.SetDirty(generator);
+                    Debug.Log("Force reload completed using TilemapSaveManager. Check the console for any errors.");
+                }
+                else
+                {
+                    // Fall back to legacy behavior if no TilemapSaveManager or saves exist
+                    Undo.RecordObject(generator, "Force Reload Tilemap");
+                    generator.LoadTilemap();
+                    EditorUtility.SetDirty(generator);
+                    Debug.Log("Force reload completed using legacy method. Check the console for any errors.");
+                }
             }
             else
             {

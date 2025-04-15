@@ -108,7 +108,13 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
                     hasBeenGenerated = true;
                     Debug.Log("Found existing tiles, updating generation state to true");
                 }
-                LoadTilemap();
+                
+                // Note: Loading is now primarily handled by TilemapSaveManager
+                // If this component is used without a TilemapSaveManager, fall back to direct loading
+                if (!TryGetComponent<TilemapSaveManager>(out _))
+                {
+                    LoadTilemap();
+                }
             }
         }
     }
@@ -442,7 +448,9 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
     }
 
     // ITilemapPersistence Implementation
-    public void SaveTilemap()
+    // Implementation of ITilemapPersistence interface
+// This is now an internal implementation that should primarily be called through TilemapSaveManager
+public void SaveTilemap()
     {
         if (!CanSaveOrLoad)
         {
@@ -610,7 +618,9 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
         return "Structure";
     }
 
-    public void LoadTilemap()
+    // Implementation of ITilemapPersistence interface
+// This is now an internal implementation that should primarily be called through TilemapSaveManager
+public void LoadTilemap()
     {
         if (!CanSaveOrLoad)
         {
@@ -949,6 +959,16 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
         return saveFilePath;
     }
 
+    // Method to set the save file path - used by TilemapSaveManager
+    public void SetSaveFilePath(string filePath)
+    {
+        if (!string.IsNullOrEmpty(filePath))
+        {
+            saveFilePath = filePath;
+            Debug.Log($"Save file path updated to: {saveFilePath}");
+        }
+    }
+    
     // Utility methods
     public Vector2 GridToIsometric(int x, int y)
     {
