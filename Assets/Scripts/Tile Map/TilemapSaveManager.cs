@@ -231,17 +231,221 @@ public class TilemapSaveManager : MonoBehaviour
         currentSaveName = saveInfo.saveName;
         currentSaveFilePath = saveInfo.filePath;
         isWorkingWithSavedMap = true;
-        
-        // Set the save file path on the TilemapGenerator
-        tilemapGenerator.SetSaveFilePath(currentSaveFilePath);
-        
-        // Load the tilemap
-        tilemapGenerator.LoadTilemap();
-        
+
+        // Read SaveData from file
+        TileMapSystem.SaveData saveData = null;
+        if (File.Exists(currentSaveFilePath))
+        {
+            string json = File.ReadAllText(currentSaveFilePath);
+            saveData = JsonUtility.FromJson<TileMapSystem.SaveData>(json);
+        }
+        else
+        {
+            Debug.LogError($"Save file not found at {currentSaveFilePath}");
+            return;
+        }
+
+        // Apply map settings from SaveData to TilemapGenerator
+        if (saveData != null)
+        {
+            // Set the save file path on the TilemapGenerator FIRST
+            // This ensures when we generate the map, it knows where to save/load from
+            tilemapGenerator.SetSaveFilePath(currentSaveFilePath);
+            
+            // Apply the saved map dimensions
+            tilemapGenerator.mapWidth = saveData.mapWidth;
+            tilemapGenerator.mapHeight = saveData.mapHeight;
+            
+            // Apply the saved map shape settings
+            if (!string.IsNullOrEmpty(saveData.mapShape))
+            {
+                if (Enum.TryParse(saveData.mapShape, out MapShape loadedShape))
+                {
+                    tilemapGenerator.mapShape = loadedShape;
+                    Debug.Log($"Set map shape to: {tilemapGenerator.mapShape}");
+                }
+                else
+                {
+                    Debug.LogWarning($"Could not parse map shape: {saveData.mapShape}");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("No map shape found in save data, using default Rectangle shape");
+            }
+            
+            if (saveData.shapeThickness > 0)
+            {
+                tilemapGenerator.shapeThickness = saveData.shapeThickness;
+                Debug.Log($"Set shape thickness to: {tilemapGenerator.shapeThickness}");
+            }
+            else
+            {
+                Debug.LogWarning("No shape thickness found in save data, using default thickness of 1");
+            }
+            
+            // Clear existing tiles first to ensure clean regeneration
+            tilemapGenerator.ClearExistingTiles();
+            
+            // Generate the map with the correct shape
+            tilemapGenerator.GenerateMap();
+            
+            // Instead of calling LoadTilemap, we'll manually place objects on the map
+            // from the save data to ensure they go in the right places
+            PlaceObjectsFromSaveData(saveData);
+        }
+        else
+        {
+            Debug.LogError($"Failed to deserialize SaveData from {currentSaveFilePath}");
+            return;
+        }
+
         // Trigger event
         OnCurrentSaveChanged?.Invoke(currentSaveName, currentSaveFilePath);
+
+        Debug.Log($"Loaded tilemap from '{saveInfo.saveName}' ({currentSaveFilePath}) and applied map settings from save file.");
+    }
+    
+    /// <summary>
+    /// Places objects on the map according to the save data
+    /// </summary>
+    /// <param name="saveData">The save data containing tile information</param>
+    private void PlaceObjectsFromSaveData(TileMapSystem.SaveData saveData)
+    {
+        if (saveData == null || saveData.tiles == null)
+            return;
+            
+        int placedCount = 0;
+        int skippedCount = 0;
         
-        Debug.Log($"Loaded tilemap from '{saveInfo.saveName}' ({currentSaveFilePath})");
+        // Apply map shape settings first to ensure the map is generated properly
+        bool mapShapeSet = false;
+        if (!string.IsNullOrEmpty(saveData.mapShape))
+        {
+            if (Enum.TryParse(saveData.mapShape, out MapShape loadedShape))
+            {
+                tilemapGenerator.mapShape = loadedShape;
+                mapShapeSet = true;
+                Debug.Log($"Set map shape to: {tilemapGenerator.mapShape} (from PlaceObjectsFromSaveData)");
+            }
+        }
+        
+        if (saveData.shapeThickness > 0)
+        {
+            tilemapGenerator.shapeThickness = saveData.shapeThickness;
+            Debug.Log($"Set shape thickness to: {saveData.shapeThickness} (from PlaceObjectsFromSaveData)");
+        }
+            
+        // Go through all tiles in the save data that have objects
+        foreach (TileMapSystem.TileData tileData in saveData.tiles)
+        {
+            // Skip tiles that don't have objects
+            if (!tileData.hasObject)
+                continue;
+                
+            // Skip invalid positions
+            if (tileData.x < 0 || tileData.x >= tilemapGenerator.mapWidth || 
+                tileData.y < 0 || tileData.y >= tilemapGenerator.mapHeight)
+            {
+                Debug.LogWarning($"Skipping object at invalid position ({tileData.x}, {tileData.y})");
+                skippedCount++;
+                continue;
+            }
+            
+            // Try to find the tile at this position
+            Vector2Int gridPos = new Vector2Int(tileData.x, tileData.y);
+            GameObject tile = tilemapGenerator.GetTileAt(gridPos);
+            
+            if (tile == null)
+            {
+                // If the map has a special shape, this position may be outside the shape
+                if (mapShapeSet && tilemapGenerator.mapShape != MapShape.Rectangle)
+                {
+                    Debug.LogWarning($"No tile found at position ({tileData.x}, {tileData.y}) - this may be due to the {tilemapGenerator.mapShape} map shape");
+                }
+                else
+                {
+                    Debug.LogWarning($"No tile found at position ({tileData.x}, {tileData.y}) - trying to create tile");
+                    
+                    // Try to create a tile at this position if it's not found (may happen with certain map shapes)
+                    tilemapGenerator.CreateTile(tileData.x, tileData.y);
+                    
+                    // Try again to get the tile
+                    tile = tilemapGenerator.GetTileAt(gridPos);
+                    
+                    if (tile == null)
+                    {
+                        Debug.LogError($"Failed to create tile at position ({tileData.x}, {tileData.y})");
+                        skippedCount++;
+                        continue;
+                    }
+                }
+            }
+            
+            // Try to load the prefab
+            string prefabPath = tileData.resourcePath;
+            if (string.IsNullOrEmpty(prefabPath))
+                prefabPath = tileData.prefabOriginalName;
+                
+            GameObject prefab = Resources.Load<GameObject>(prefabPath);
+            if (prefab == null && prefabPath.Contains("/"))
+            {
+                // Try loading just the name part
+                string prefabName = prefabPath.Substring(prefabPath.LastIndexOf('/') + 1);
+                prefab = Resources.Load<GameObject>(prefabName);
+                
+                // If still null, try to find among existing prefabs by name
+                if (prefab == null)
+                {
+                    Debug.LogWarning($"Could not load prefab at path: {prefabPath}, trying to find by name");
+                }
+            }
+            
+            if (prefab != null)
+            {
+                // Remove any existing objects on this tile
+                foreach (Transform child in tile.transform)
+                {
+                    if (Application.isPlaying)
+                        Destroy(child.gameObject);
+                    else
+                        DestroyImmediate(child.gameObject);
+                }
+                
+                // Instantiate the new object on this tile
+                GameObject newObject = Instantiate(prefab);
+                
+                // Set position
+                Vector3 targetPosition = tileData.objectWorldPosition;
+                if (targetPosition == Vector3.zero)
+                    targetPosition = tile.transform.position;
+                    
+                newObject.transform.position = targetPosition;
+                
+                // Parent to tile
+                newObject.transform.SetParent(tile.transform, true);
+                
+                // Keep the position correct after parenting
+                if (newObject.transform.position != targetPosition)
+                    newObject.transform.position = targetPosition;
+                    
+                // Set name
+                if (!string.IsNullOrEmpty(tileData.prefabOriginalName))
+                    newObject.name = tileData.prefabOriginalName;
+                    
+                // Register the prefab path
+                tilemapGenerator.RegisterPrefabPath(newObject, prefabPath);
+                
+                placedCount++;
+            }
+            else
+            {
+                Debug.LogWarning($"Could not load prefab at path: {prefabPath}");
+                skippedCount++;
+            }
+        }
+        
+        Debug.Log($"Placed {placedCount} objects from save data with {saveData.tiles.Count(t => t.hasObject)} object tiles. Skipped {skippedCount} objects.");
     }
 
     /// <summary>

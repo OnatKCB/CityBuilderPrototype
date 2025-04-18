@@ -328,33 +328,38 @@ public class TilemapGenerator : MonoBehaviour, ITilemapGenerator, ITilemapPersis
                             Destroy(tiles[x, y]);
                         else
                             DestroyImmediate(tiles[x, y]);
+                        tiles[x, y] = null;
                     }
                 }
             }
         }
-        
-        // Clean up any leftover children directly on this GameObject
-        foreach (Transform child in transform)
-        {
-            // Skip the grid container itself
-            if (child == gridContainer) continue;
-            
-            if (Application.isPlaying)
-                Destroy(child.gameObject);
-            else
-                DestroyImmediate(child.gameObject);
-        }
-        
-        // Also clean up any leftover children in the gridContainer if it exists
+        // Remove all children from gridContainer (including out-of-bounds tiles)
         if (gridContainer != null)
         {
+            var children = new List<Transform>();
             foreach (Transform child in gridContainer)
+                children.Add(child);
+            foreach (var child in children)
             {
                 if (Application.isPlaying)
                     Destroy(child.gameObject);
                 else
                     DestroyImmediate(child.gameObject);
             }
+        }
+        // Remove all children directly on this GameObject except gridContainer
+        foreach (Transform child in transform)
+        {
+            if (child == gridContainer) continue;
+            if (Application.isPlaying)
+                Destroy(child.gameObject);
+            else
+                DestroyImmediate(child.gameObject);
+        }
+        // If using Unity Grid, clear the Unity Tilemap
+        if (useUnityGrid && unityTilemap != null)
+        {
+            unityTilemap.ClearAllTiles();
         }
     }    public void CreateTile(int x, int y)
     {
@@ -465,6 +470,9 @@ public void SaveTilemap()
         saveData.mapWidth = mapWidth;
         saveData.mapHeight = mapHeight;
         saveData.saveDescription = "Tilemap save data with detailed tile information";
+        // NEW: Save map shape and thickness
+        saveData.mapShape = mapShape.ToString();
+        saveData.shapeThickness = shapeThickness;
         int savedCount = 0;
         int emptyTileCount = 0;
 
@@ -638,14 +646,26 @@ public void LoadTilemap()
         {
             string json = File.ReadAllText(saveFilePath);
             SaveData saveData = JsonUtility.FromJson<SaveData>(json);
-            
-            // Verify map dimensions - warn if different
+            // Always restore map shape and thickness before generating map
+            if (!string.IsNullOrEmpty(saveData.mapShape))
+            {
+                if (Enum.TryParse(saveData.mapShape, out MapShape loadedShape))
+                    mapShape = loadedShape;
+            }
+            if (saveData.shapeThickness > 0)
+                shapeThickness = saveData.shapeThickness;
             if (saveData.mapWidth != mapWidth || saveData.mapHeight != mapHeight)
             {
-                Debug.LogWarning($"Loaded map dimensions ({saveData.mapWidth}x{saveData.mapHeight}) " +
-                                $"differ from current dimensions ({mapWidth}x{mapHeight})");
+                mapWidth = saveData.mapWidth;
+                mapHeight = saveData.mapHeight;
             }
-            
+            // Regenerate grid with correct shape/size in both play and edit mode
+            GenerateMap();
+#if UNITY_EDITOR
+            // Mark as dirty and repaint inspector in edit mode
+            EditorUtility.SetDirty(this);
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+#endif
             // Check if the tiles array is null or incorrectly sized - initialize it if needed
             if (tiles == null)
             {

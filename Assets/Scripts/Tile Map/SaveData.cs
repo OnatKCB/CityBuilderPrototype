@@ -19,6 +19,10 @@ namespace TileMapSystem
         public int mapHeight;
         public string version = "1.1"; // Track the version of the save format
         
+        // NEW: Save map shape and thickness
+        public string mapShape; // Store as string for serialization
+        public int shapeThickness;
+        
         // Metadata for the save file
         public string createdBy = "CozyCityBuilder";
         public string saveDescription;
